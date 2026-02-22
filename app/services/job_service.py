@@ -25,9 +25,12 @@ class JobService:
         search_params: JobSearchParams,
         skip: int = 0,
         limit: int = 10,
+        approved_only: bool = True,
     ) -> List[Job]:
-        """List jobs from the catalog with optional filters."""
+        """List jobs from the catalog with optional filters. By default only approved jobs (for users)."""
         query = self.db.query(Job)
+        if approved_only:
+            query = query.filter(Job.status == "approved")
         if search_params.query:
             q = f"%{search_params.query}%"
             query = query.filter(
@@ -42,7 +45,7 @@ class JobService:
             query = query.filter(Job.job_type == search_params.job_type)
         if search_params.source:
             query = query.filter(Job.source == search_params.source)
-        return query.offset(skip).limit(limit).all()
+        return query.order_by(Job.created_at.desc()).offset(skip).limit(limit).all()
 
     def create_job(self, job_create: JobCreate) -> Job:
         """Create a job in the catalog (e.g. manual add)."""
@@ -134,3 +137,38 @@ class JobService:
         for db_job in result:
             self.db.refresh(db_job)
         return result
+
+    def find_matching_jobs_for_automation(
+        self,
+        target_titles: Optional[str],
+        locations: Optional[str],
+        exclude_job_ids: List[int],
+        limit: int,
+    ) -> List[Job]:
+        """
+        Find approved jobs matching automation criteria (title/description keywords, location).
+        Excludes job_ids the user already has. Used by automation run.
+        """
+        query = self.db.query(Job).filter(Job.status == "approved")
+        if exclude_job_ids:
+            query = query.filter(~Job.id.in_(exclude_job_ids))
+
+        if target_titles and target_titles.strip():
+            keywords = [k.strip().lower() for k in target_titles.split(",") if k.strip()]
+            if keywords:
+                or_clauses = []
+                for kw in keywords:
+                    pattern = f"%{kw}%"
+                    or_clauses.append(Job.title.ilike(pattern))
+                    or_clauses.append(
+                        (Job.description.isnot(None) & Job.description.ilike(pattern))
+                    )
+                query = query.filter(or_(*or_clauses))
+
+        if locations and locations.strip():
+            loc_terms = [l.strip() for l in locations.split(",") if l.strip()]
+            if loc_terms:
+                loc_clauses = [Job.location.ilike(f"%{loc}%") for loc in loc_terms]
+                query = query.filter(or_(*loc_clauses))
+
+        return query.order_by(Job.created_at.desc()).limit(limit).all()

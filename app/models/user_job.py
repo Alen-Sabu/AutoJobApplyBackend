@@ -32,6 +32,7 @@ class UserJob(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    automation_id = Column(Integer, ForeignKey("automations.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(Enum(UserJobStatus), default=UserJobStatus.SAVED, nullable=False)
     applied_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
@@ -42,3 +43,4 @@ class UserJob(Base):
 
     user = relationship("User", back_populates="user_jobs")
     job = relationship("Job", back_populates="user_jobs")
+    automation = relationship("Automation", back_populates="user_jobs")

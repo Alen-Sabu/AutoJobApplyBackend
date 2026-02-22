@@ -1,7 +1,7 @@
 """
 UserJob service.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy.orm import Session, joinedload
@@ -32,6 +32,7 @@ class UserJobService:
         skip: int = 0,
         limit: int = 10,
         status_filter: Optional[str] = None,
+        automation_id: Optional[int] = None,
     ) -> List[UserJob]:
         """Get user's saved/applied jobs (with job loaded)."""
         query = (
@@ -45,7 +46,24 @@ class UserJobService:
                 query = query.filter(UserJob.status == status_enum)
             except ValueError:
                 pass
+        if automation_id is not None:
+            query = query.filter(UserJob.automation_id == automation_id)
         return query.offset(skip).limit(limit).all()
+
+    def get_user_jobs_for_automation(
+        self,
+        user_id: int,
+        automation_id: int,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[UserJob]:
+        """Get user_jobs linked to a specific automation (with job loaded)."""
+        return self.get_user_jobs(
+            user_id=user_id,
+            skip=skip,
+            limit=limit,
+            automation_id=automation_id,
+        )
 
     def get_by_user_and_job(self, user_id: int, job_id: int) -> Optional[UserJob]:
         """Get user_job by user and job."""
@@ -55,10 +73,59 @@ class UserJobService:
             .first()
         )
 
+    def get_job_ids_for_user(self, user_id: int) -> List[int]:
+        """Return list of job_ids the user has any user_job for (any status)."""
+        rows = (
+            self.db.query(UserJob.job_id)
+            .filter(UserJob.user_id == user_id)
+            .distinct()
+            .all()
+        )
+        return [r[0] for r in rows]
+
+    def apply_to_jobs(
+        self,
+        user_id: int,
+        job_ids: List[int],
+        automation_id: int,
+    ) -> List[UserJob]:
+        """
+        Create or update user_jobs as SUBMITTED with applied_at and automation_id.
+        Returns the list of UserJob records created or updated.
+        """
+        now = datetime.now(timezone.utc)
+        result: List[UserJob] = []
+        for job_id in job_ids:
+            existing = self.get_by_user_and_job(user_id, job_id)
+            if existing:
+                existing.status = UserJobStatus.SUBMITTED
+                existing.applied_at = now
+                existing.automation_id = automation_id
+                self.db.add(existing)
+                result.append(existing)
+            else:
+                uj = UserJob(
+                    user_id=user_id,
+                    job_id=job_id,
+                    automation_id=automation_id,
+                    status=UserJobStatus.SUBMITTED,
+                    applied_at=now,
+                )
+                self.db.add(uj)
+                result.append(uj)
+        self.db.commit()
+        for uj in result:
+            self.db.refresh(uj)
+        return result
+
     def add_user_job(self, user_id: int, user_job_create: UserJobCreate) -> UserJob:
-        """Add a job to the user's list (save or start application)."""
+        """Add a job to the user's list (save or start application). If automation_id given and row exists, link it."""
         existing = self.get_by_user_and_job(user_id, user_job_create.job_id)
         if existing:
+            if user_job_create.automation_id is not None:
+                existing.automation_id = user_job_create.automation_id
+                self.db.commit()
+                self.db.refresh(existing)
             return existing
         db_user_job = UserJob(
             user_id=user_id,

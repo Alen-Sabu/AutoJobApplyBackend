@@ -22,8 +22,18 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+class UserInfo(BaseModel):
+    """Minimal user info returned with token (for redirect by role)."""
+    id: int
+    email: str
+    full_name: str | None
+    role: str  # 'user' | 'company'; admin is is_superuser
+    is_superuser: bool
+
+
 class Token(BaseModel):
     """Token response schema."""
     access_token: str
     token_type: str
+    user: UserInfo | None = None
 

@@ -24,6 +24,7 @@ def _user_job_with_job(uj):
         id=uj.id,
         user_id=uj.user_id,
         job_id=uj.job_id,
+        automation_id=getattr(uj, "automation_id", None),
         status=uj.status,
         notes=uj.notes,
         resume_path=uj.resume_path,
@@ -40,13 +41,18 @@ async def get_my_user_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     status_filter: Optional[str] = Query(None, description="Filter by status"),
+    automation_id: Optional[int] = Query(None, description="Filter by automation"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """Get current user's saved/applied jobs with job details."""
     service = UserJobService(db)
     user_jobs = service.get_user_jobs(
-        current_user.id, skip=skip, limit=limit, status_filter=status_filter
+        current_user.id,
+        skip=skip,
+        limit=limit,
+        status_filter=status_filter,
+        automation_id=automation_id,
     )
     return [_user_job_with_job(uj) for uj in user_jobs]
 

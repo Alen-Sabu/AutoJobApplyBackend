@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import jwt
 from app.models.user import User
+from app.models.company import Company
 from app.schemas.auth import UserCreate
+from app.schemas.company import CompanyRegister
 from app.core.config import settings
 
 
@@ -61,14 +63,39 @@ class AuthService:
         return user
 
     def create_user(self, user_create: UserCreate) -> User:
-        """Create a new user."""
+        """Create a new user (role=user)."""
         hashed_password = self.get_password_hash(user_create.password)
         db_user = User(
             email=user_create.email,
             hashed_password=hashed_password,
-            full_name=user_create.full_name
+            full_name=user_create.full_name,
+            role="user",
         )
         self.db.add(db_user)
+        self.db.commit()
+        self.db.refresh(db_user)
+        return db_user
+
+    def create_company_user(self, payload: CompanyRegister) -> User:
+        """Create a user with role=company and their Company profile."""
+        if self.get_user_by_email(payload.email):
+            raise ValueError("Email already registered")
+        hashed_password = self.get_password_hash(payload.password)
+        db_user = User(
+            email=payload.email,
+            hashed_password=hashed_password,
+            full_name=payload.full_name or payload.company_name,
+            role="company",
+        )
+        self.db.add(db_user)
+        self.db.flush()  # get db_user.id
+        company = Company(
+            user_id=db_user.id,
+            company_name=payload.company_name,
+            description=payload.description,
+            website=payload.website,
+        )
+        self.db.add(company)
         self.db.commit()
         self.db.refresh(db_user)
         return db_user

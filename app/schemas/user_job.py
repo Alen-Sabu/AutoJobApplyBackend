@@ -11,6 +11,7 @@ class UserJobBase(BaseModel):
     """Base user_job schema."""
 
     job_id: int
+    automation_id: Optional[int] = None
     status: Optional[UserJobStatus] = UserJobStatus.SAVED
     notes: Optional[str] = None
     resume_path: Optional[str] = None
@@ -37,6 +38,7 @@ class UserJobResponse(UserJobBase):
 
     id: int
     user_id: int
+    automation_id: Optional[int] = None
     applied_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

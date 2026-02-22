@@ -21,11 +21,14 @@ class User(Base):
     two_factor_enabled = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    role = Column(String, nullable=False, default="user", index=True)  # 'user' | 'company'
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
     profile = relationship("Profile", back_populates="user", uselist=False)
+    company = relationship("Company", back_populates="user", uselist=False)
     user_setup = relationship("UserSetup", back_populates="user", uselist=False)
     user_jobs = relationship("UserJob", back_populates="user")
 

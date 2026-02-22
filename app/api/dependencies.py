@@ -8,6 +8,7 @@ from jose import JWTError, jwt
 from app.core.database import get_db
 from app.core.config import settings
 from app.models.user import User
+from app.models.company import Company
 from app.services.auth_service import AuthService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
@@ -52,4 +53,25 @@ async def get_current_admin(
             detail="Admin access required.",
         )
     return current_user
+
+
+async def get_current_company(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Company:
+    """
+    Ensure the current user is a company and return their Company profile.
+    """
+    if getattr(current_user, "role", None) != "company":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Company account required.",
+        )
+    company = db.query(Company).filter(Company.user_id == current_user.id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Company profile not found.",
+        )
+    return company
 
