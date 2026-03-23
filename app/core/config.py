@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     class Config:
         # .env lives in the app/ directory (e.g. app/.env)
-        env_file = "app/.env"
+        env_file = ".env"
         case_sensitive = True
 
 
