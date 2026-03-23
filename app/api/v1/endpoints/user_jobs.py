@@ -14,6 +14,7 @@ from app.schemas.user_job import (
 from app.schemas.job import JobResponse
 from app.services.user_job_service import UserJobService
 from app.api.dependencies import get_current_user
+from app.models.user_job import UserJobStatus
 
 router = APIRouter()
 
@@ -57,6 +58,19 @@ async def get_my_user_jobs(
     return [_user_job_with_job(uj) for uj in user_jobs]
 
 
+# Statuses that mean the user has already completed an application for this job
+_ALREADY_APPLIED_STATUSES = frozenset(
+    {
+        UserJobStatus.SUBMITTED,
+        UserJobStatus.REVIEWING,
+        UserJobStatus.INTERVIEW,
+        UserJobStatus.REJECTED,
+        UserJobStatus.ACCEPTED,
+        UserJobStatus.WITHDRAWN,
+    }
+)
+
+
 @router.post("/", response_model=UserJobResponseWithJob, status_code=status.HTTP_201_CREATED)
 async def add_user_job(
     payload: UserJobCreate,
@@ -65,6 +79,12 @@ async def add_user_job(
 ):
     """Save a job to the user's list (or start an application)."""
     service = UserJobService(db)
+    existing = service.get_by_user_and_job(current_user.id, payload.job_id)
+    if existing and existing.status in _ALREADY_APPLIED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already applied to this job",
+        )
     uj = service.add_user_job(current_user.id, payload)
     # Reload with job relationship
     uj = service.get_user_job(uj.id, current_user.id)
