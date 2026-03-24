@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.schemas.user_job import (
     UserJobCreate,
+    UserJobApplyOne,
     UserJobUpdate,
     UserJobResponseWithJob,
 )
@@ -58,6 +59,25 @@ async def get_my_user_jobs(
     return [_user_job_with_job(uj) for uj in user_jobs]
 
 
+@router.get("/applications", response_model=List[UserJobResponseWithJob])
+async def get_my_applications(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    status_filter: Optional[str] = Query(None, description="Filter application status"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Get current user's application records with full job details and status."""
+    service = UserJobService(db)
+    user_jobs = service.get_user_applications(
+        current_user.id,
+        skip=skip,
+        limit=limit,
+        status_filter=status_filter,
+    )
+    return [_user_job_with_job(uj) for uj in user_jobs]
+
+
 # Statuses that mean the user has already completed an application for this job
 _ALREADY_APPLIED_STATUSES = frozenset(
     {
@@ -77,7 +97,7 @@ async def add_user_job(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Save a job to the user's list (or start an application)."""
+    """Create an application for the current user and mark it as submitted."""
     service = UserJobService(db)
     existing = service.get_by_user_and_job(current_user.id, payload.job_id)
     if existing and existing.status in _ALREADY_APPLIED_STATUSES:
@@ -86,7 +106,47 @@ async def add_user_job(
             detail="You have already applied to this job",
         )
     uj = service.add_user_job(current_user.id, payload)
+
+    # This endpoint is application-first: always convert to submitted.
+    uj = service.submit_user_job(uj.id, current_user.id)
+
     # Reload with job relationship
+    uj = service.get_user_job(uj.id, current_user.id)
+    return _user_job_with_job(uj)
+
+
+@router.post("/apply", response_model=UserJobResponseWithJob, status_code=status.HTTP_201_CREATED)
+async def apply_single_job(
+    payload: UserJobApplyOne,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Apply to one job for current user (creates/updates as submitted)."""
+    service = UserJobService(db)
+    existing = service.get_by_user_and_job(current_user.id, payload.job_id)
+    if existing and existing.status in _ALREADY_APPLIED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already applied to this job",
+        )
+    uj = service.apply_to_job(
+        user_id=current_user.id,
+        job_id=payload.job_id,
+        automation_id=payload.automation_id,
+    )
+    uj = service.get_user_job(uj.id, current_user.id)
+    return _user_job_with_job(uj)
+
+
+@router.post("/save", response_model=UserJobResponseWithJob, status_code=status.HTTP_201_CREATED)
+async def save_user_job(
+    payload: UserJobCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Save a job to the user's list without submitting an application."""
+    service = UserJobService(db)
+    uj = service.add_user_job(current_user.id, payload)
     uj = service.get_user_job(uj.id, current_user.id)
     return _user_job_with_job(uj)
 

@@ -24,6 +24,13 @@ class UserJobCreate(UserJobBase):
     pass
 
 
+class UserJobApplyOne(BaseModel):
+    """Apply to a single job for current user."""
+
+    job_id: int
+    automation_id: Optional[int] = None
+
+
 class UserJobUpdate(BaseModel):
     """Update user_job fields."""
 

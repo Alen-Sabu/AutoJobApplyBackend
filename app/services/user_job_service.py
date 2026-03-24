@@ -65,6 +65,42 @@ class UserJobService:
             automation_id=automation_id,
         )
 
+    def get_user_applications(
+        self,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        status_filter: Optional[str] = None,
+    ) -> List[UserJob]:
+        """Get user's applied jobs (exclude saved/draft; with job loaded)."""
+        query = (
+            self.db.query(UserJob)
+            .options(joinedload(UserJob.job))
+            .filter(
+                UserJob.user_id == user_id,
+                UserJob.status.notin_([UserJobStatus.SAVED, UserJobStatus.DRAFT]),
+            )
+        )
+
+        if status_filter:
+            try:
+                status_enum = UserJobStatus(status_filter)
+                query = query.filter(UserJob.status == status_enum)
+            except ValueError:
+                pass
+
+        return (
+            query
+            .order_by(
+                UserJob.applied_at.desc().nullslast(),
+                UserJob.created_at.desc(),
+                UserJob.id.desc(),
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
     def get_by_user_and_job(self, user_id: int, job_id: int) -> Optional[UserJob]:
         """Get user_job by user and job."""
         return (
@@ -117,6 +153,40 @@ class UserJobService:
         for uj in result:
             self.db.refresh(uj)
         return result
+
+    def apply_to_job(
+        self,
+        user_id: int,
+        job_id: int,
+        automation_id: Optional[int] = None,
+    ) -> UserJob:
+        """
+        Create or update a single user_job as SUBMITTED with applied_at.
+        Optionally links automation_id.
+        """
+        now = datetime.now(timezone.utc)
+        existing = self.get_by_user_and_job(user_id, job_id)
+        if existing:
+            existing.status = UserJobStatus.SUBMITTED
+            existing.applied_at = now
+            if automation_id is not None:
+                existing.automation_id = automation_id
+            self.db.add(existing)
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+
+        uj = UserJob(
+            user_id=user_id,
+            job_id=job_id,
+            automation_id=automation_id,
+            status=UserJobStatus.SUBMITTED,
+            applied_at=now,
+        )
+        self.db.add(uj)
+        self.db.commit()
+        self.db.refresh(uj)
+        return uj
 
     def add_user_job(self, user_id: int, user_job_create: UserJobCreate) -> UserJob:
         """Add a job to the user's list (save or start application). If automation_id given and row exists, link it."""
