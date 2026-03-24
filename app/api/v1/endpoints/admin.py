@@ -5,19 +5,22 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.api.dependencies import get_current_admin
 from app.models.user import User
 from app.models.job import Job
 from app.models.automation import Automation
-from app.models.user_job import UserJob
+from app.models.user_job import UserJob, UserJobStatus
 from app.models.audit_log import AuditLog
 from app.schemas.admin import (
     AdminUserOut,
     AdminJobOut,
     AdminAutomationOut,
+    AdminApplicationOut,
+    AdminApplicationStatusUpdate,
     AdminSiteSettingsOut,
     AdminSiteSettingsUpdate,
     AdminStatCard,
@@ -111,6 +114,36 @@ def _map_job_to_admin_out(job: Job) -> AdminJobOut:
         description=job.description,
         jobUrl=job.job_url,
         source=job.source,
+    )
+
+
+def _map_application_to_admin_out(user_job: UserJob) -> AdminApplicationOut:
+    user = user_job.user
+    job = user_job.job
+    user_name = (
+        (user.full_name or user.username or (user.email.split("@")[0] if user and user.email else ""))
+        if user
+        else ""
+    )
+    user_email = user.email if user else ""
+    return AdminApplicationOut(
+        id=user_job.id,
+        user_id=user_job.user_id,
+        user_name=user_name,
+        user_email=user_email,
+        job_id=user_job.job_id,
+        job_title=(job.title if job else ""),
+        job_company=(job.company if job else ""),
+        job_location=(job.location if job else None),
+        job_type=(job.job_type if job else None),
+        status=user_job.status,
+        automation_id=user_job.automation_id,
+        notes=user_job.notes,
+        resume_path=user_job.resume_path,
+        cover_letter_path=user_job.cover_letter_path,
+        applied_at=user_job.applied_at,
+        created_at=user_job.created_at,
+        updated_at=user_job.updated_at,
     )
 
 
@@ -345,6 +378,100 @@ async def admin_reject_job(
         target=f"Job #{job_id}",
         ip="-",
     )
+
+
+# —— Admin Applications ——
+
+
+@router.get("/applications", response_model=List[AdminApplicationOut])
+async def admin_list_applications(
+    search: Optional[str] = Query(None, description="Search by user name/email or job title/company"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by application status"),
+    user_id: Optional[int] = Query(None, description="Filter by user id"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """List all applications across users with user details, job details, and application details."""
+    query = (
+        db.query(UserJob)
+        .options(joinedload(UserJob.user), joinedload(UserJob.job))
+    )
+
+    if user_id is not None:
+        query = query.filter(UserJob.user_id == user_id)
+
+    if status_filter:
+        try:
+            status_enum = UserJobStatus(status_filter)
+            query = query.filter(UserJob.status == status_enum)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid application status")
+
+    if search:
+        s = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                UserJob.user.has(
+                    or_(
+                        User.email.ilike(s),
+                        User.full_name.isnot(None) & User.full_name.ilike(s),
+                    )
+                ),
+                UserJob.job.has(
+                    or_(
+                        Job.title.ilike(s),
+                        Job.company.ilike(s),
+                    )
+                ),
+            )
+        )
+
+    rows = (
+        query.order_by(
+            func.coalesce(UserJob.applied_at, UserJob.created_at).desc(),
+            UserJob.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return [_map_application_to_admin_out(r) for r in rows]
+
+
+@router.put("/applications/{user_job_id}/status", response_model=AdminApplicationOut)
+async def admin_update_application_status(
+    user_job_id: int,
+    payload: AdminApplicationStatusUpdate,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Update application status as admin."""
+    row = (
+        db.query(UserJob)
+        .options(joinedload(UserJob.user), joinedload(UserJob.job))
+        .filter(UserJob.id == user_job_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found.")
+
+    row.status = payload.status
+    if payload.status == UserJobStatus.SUBMITTED and row.applied_at is None:
+        row.applied_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+
+    audit = AuditService(db)
+    audit.log(
+        actor=admin,
+        action="application.status.updated",
+        target=f"Application #{user_job_id} -> {payload.status.value}",
+        ip="-",
+    )
+
+    return _map_application_to_admin_out(row)
 
 
 # —— Admin Automations ——

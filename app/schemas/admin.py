@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel
+from app.models.user_job import UserJobStatus
 
 
 class AdminAutomationOut(BaseModel):
@@ -126,5 +127,33 @@ class AdminAuditEntry(BaseModel):
     action: str
     target: str
     ip: str
+
+
+class AdminApplicationOut(BaseModel):
+    """Application row for admin with user, job, and application details."""
+
+    id: int
+    user_id: int
+    user_name: str
+    user_email: str
+    job_id: int
+    job_title: str
+    job_company: str
+    job_location: Optional[str] = None
+    job_type: Optional[str] = None
+    status: UserJobStatus
+    automation_id: Optional[int] = None
+    notes: Optional[str] = None
+    resume_path: Optional[str] = None
+    cover_letter_path: Optional[str] = None
+    applied_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class AdminApplicationStatusUpdate(BaseModel):
+    """Admin payload to update an application status."""
+
+    status: UserJobStatus
 
 
